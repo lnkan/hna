@@ -27,6 +27,14 @@ window.HNA = {
     { key: 'frais', label: 'Frais' },
   ],
 
+  // Tranches du filtre « Budget » (en ariary, bornes incluses).
+  budgets: [
+    { key: 'b1', label: 'Moins de 200 000 Ar', min: 0, max: 199999 },
+    { key: 'b2', label: '200 000 à 400 000 Ar', min: 200000, max: 400000 },
+    { key: 'b3', label: '400 000 à 500 000 Ar', min: 400001, max: 500000 },
+    { key: 'b4', label: 'Plus de 500 000 Ar', min: 500001, max: Infinity },
+  ],
+
   products: [
     {
       sku: 'DOSE', brand: 'Dior', name: 'Sauvage Elixir', type: 'Eau de parfum', gender: 'Homme', size: '60 ml',

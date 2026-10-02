@@ -1,5 +1,5 @@
 (() => {
-  const { config, products, families, featured } = window.HNA;
+  const { config, products, families, featured, budgets = [] } = window.HNA;
   const bySku = new Map(products.map((p) => [p.sku, p]));
 
   const $ = (s, r = document) => r.querySelector(s);
@@ -50,7 +50,12 @@
 
   /* ───────────── Liens de contact ───────────── */
   $$('.js-wa').forEach((a) => { a.href = wa(a.dataset.msg || 'Bonjour HNA Parfumerie !'); });
-  $$('.js-logo').forEach((img) => { img.src = config.logo; });
+  // Logo hébergé ailleurs : s'il ne répond pas, un monogramme le remplace.
+  const MONOGRAM = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><rect width="40" height="40" fill="#1f1512"/><text x="20" y="25.5" text-anchor="middle" font-family="Georgia,serif" font-size="14" letter-spacing="1" fill="#f6f1ea">HN</text></svg>');
+  $$('.js-logo').forEach((img) => {
+    img.addEventListener('error', () => { img.src = MONOGRAM; }, { once: true });
+    img.src = config.logo;
+  });
   $$('.js-phone').forEach((el) => { el.textContent = config.phoneDisplay; });
   $$('.js-email').forEach((el) => { el.textContent = config.email; });
   const link = (sel, href) => $$(sel).forEach((a) => { a.href = href; });
@@ -74,7 +79,7 @@
   const deckItems = featured.map((sku) => bySku.get(sku)).filter(Boolean);
   deck.innerHTML = deckItems.map((p, i) => `
     <a class="blot" href="#p-${p.sku}" data-sku="${p.sku}" data-pos="${i}"${i ? ' tabindex="-1" aria-hidden="true"' : ''}>
-      <span class="blot__img"><img src="${p.img}" alt="${esc(label(p))}" referrerpolicy="no-referrer" decoding="async"></span>
+      <span class="blot__img" data-fallback="${esc(p.brand)}"><img src="${p.img}" alt="${esc(label(p))}" referrerpolicy="no-referrer" decoding="async"></span>
       <span class="blot__brand">${esc(p.brand)}</span>
       <span class="blot__name">${esc(p.name)}</span>
       <span class="blot__row"><b>${price(p.price)}</b><span>Voir ${icon('arrow')}</span></span>
@@ -130,7 +135,10 @@
 
   /* ───────────── Catalogue ───────────── */
   const grid = $('#grid');
-  const state = { gender: 'all', family: 'all', q: '', sort: 'featured' };
+  const state = { gender: 'all', family: 'all', budget: 'all', q: '', sort: 'featured' };
+  const budgetByKey = new Map(budgets.map((b) => [b.key, b]));
+  $('#budget').insertAdjacentHTML('beforeend', budgets
+    .map((b) => `<option value="${b.key}">${esc(b.label)}</option>`).join(''));
 
   $('#family-chips').innerHTML = families
     .map((f) => `<button class="chip" type="button" data-family="${f.key}" aria-pressed="false">${f.label}</button>`).join('');
@@ -146,7 +154,7 @@
     return `
     <article class="card reveal" id="p-${p.sku}" data-sku="${p.sku}" style="view-transition-name: card-${p.sku}">
       <button class="card__close" type="button" aria-label="Fermer la fiche">${icon('close')}</button>
-      <div class="card__media" data-brand="${esc(p.brand)}"><img src="${p.img}" alt="${esc(label(p))}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div>
+      <div class="card__media" data-fallback="${esc(p.brand)}"><img src="${p.img}" alt="${esc(label(p))}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div>
       <div class="card__info">
         <p class="card__brand">${esc(p.brand)}</p>
         <h3 class="card__name"><button class="card__open" type="button" aria-expanded="false" aria-controls="d-${p.sku}">${esc(p.name)}</button></h3>
@@ -162,6 +170,7 @@
         <p class="card__facts" style="--i:2">${esc(facts)}</p>
         <div class="card__actions" style="--i:3">
           <a class="btn btn--dark" href="${esc(wa(msg))}" target="_blank" rel="noopener">${icon('wa')}<span>Commander sur WhatsApp</span></a>
+          <button class="btn btn--line" type="button" data-share="${p.sku}">${icon('share')}<span>Partager</span></button>
         </div>
       </div>
     </article>`;
@@ -169,10 +178,11 @@
 
   // Les événements load / error ne remontent pas : on les capte à la descente.
   grid.addEventListener('load', (e) => { if (e.target.tagName === 'IMG') e.target.classList.add('is-loaded'); }, true);
-  grid.addEventListener('error', (e) => {
+  // Photo introuvable (catalogue, éventail, sélection) : la marque prend sa place.
+  document.addEventListener('error', (e) => {
     if (e.target.tagName !== 'IMG') return;
     e.target.classList.add('is-loaded');
-    e.target.closest('.card__media')?.classList.add('is-missing');
+    e.target.closest('[data-fallback]')?.classList.add('is-missing');
   }, true);
   grid.innerHTML = products.map(cardHTML).join('');
   $$('img', grid).forEach((img) => { if (img.complete && img.naturalWidth) img.classList.add('is-loaded'); });
@@ -192,12 +202,14 @@
 
   function apply() {
     const terms = fold(state.q.trim()).split(/\s+/).filter(Boolean);
+    const range = budgetByKey.get(state.budget);
     let shown = 0;
     [...products].sort(sorters[state.sort]).forEach((p) => {
       const card = cards.get(p.sku);
       grid.append(card);
       const ok = (state.gender === 'all' || p.gender === state.gender)
         && (state.family === 'all' || p.families.includes(state.family))
+        && (!range || (p.price >= range.min && p.price <= range.max))
         && terms.every((t) => haystack.get(p.sku).includes(t));
       card.hidden = !ok;
       if (!ok && card.classList.contains('is-open')) setOpen(card, false);
@@ -226,9 +238,11 @@
   });
   $('#search').addEventListener('input', (e) => { state.q = e.target.value; apply(); });
   $('#sort').addEventListener('change', (e) => { state.sort = e.target.value; transition(apply); });
+  $('#budget').addEventListener('change', (e) => { state.budget = e.target.value; transition(apply); });
   function resetFilters() {
-    Object.assign(state, { gender: 'all', family: 'all', q: '' });
+    Object.assign(state, { gender: 'all', family: 'all', budget: 'all', q: '' });
     $('#search').value = '';
+    $('#budget').value = 'all';
     setPressed('gender', 'all');
     setPressed('family', 'all');
   }
@@ -263,11 +277,27 @@
   grid.addEventListener('click', (e) => {
     const add = e.target.closest('[data-add]');
     if (add) { toggleItem(add.dataset.add); return; }
+    const share = e.target.closest('[data-share]');
+    if (share) { shareProduct(share); return; }
     const card = e.target.closest('.card');
     if (!card) return;
     if (e.target.closest('.card__close')) { toggleCard(card, false); $('.card__open', card).focus({ preventScroll: true }); return; }
     if (e.target.closest('.card__open') && !card.classList.contains('is-open')) toggleCard(card, true);
   });
+
+  /* Partage d'une fiche : feuille de partage du téléphone, sinon lien copié. */
+  async function shareProduct(btn) {
+    const p = bySku.get(btn.dataset.share);
+    const url = `${location.href.split('#')[0]}#p-${p.sku}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: label(p), text: `${label(p)}, ${plainPrice(p.price)} chez HNA Parfumerie`, url }); } catch { /* partage annulé */ }
+      return;
+    }
+    try { await navigator.clipboard.writeText(url); } catch { return; }
+    const span = $('span', btn);
+    span.textContent = 'Lien copié';
+    setTimeout(() => { span.textContent = 'Partager'; }, 2000);
+  }
 
   /* ───────────── Sélection → WhatsApp ───────────── */
   const tray = $('#tray');
@@ -308,7 +338,7 @@
       const p = bySku.get(sku);
       return `
       <li class="tray__item">
-        <span class="tray__thumb"><img src="${p.img}" alt="" referrerpolicy="no-referrer"></span>
+        <span class="tray__thumb" data-fallback="${esc(p.brand.charAt(0))}"><img src="${p.img}" alt="" referrerpolicy="no-referrer"></span>
         <p>${esc(p.brand)} ${esc(p.name)}<small>${price(p.price)}${p.size ? ` · ${esc(p.size)}` : ''}</small></p>
         <span class="qty">
           <button type="button" data-qty="-1" data-sku="${sku}" aria-label="Retirer un ${esc(label(p))}">${icon('minus')}</button>
